@@ -1,0 +1,12 @@
+%artist% - %title%
+$if(%album%,[%album%] ,)%title%
+$if2(%artist%,unknown)$ifgreater(%track%,5,high,low)
+$left(%title%,3)$right(%title%,2)$substr(%title%,1,4)
+$upper(%artist%)$lower(%album%)$caps(%title%)
+$pad(%track%,3,0)$num(%track%,2)$strcmp(%artist%,x)
+$replace(%title%,a,b)$repeat(ab,3)$len(%title%)
+$add(1,2)$sub(5,3)$mul(2,3)$div(8,2)$mod(9,4)
+[%genre% ]$if($and(%year%,%artist%),yes,no)$or(1,0)$not(1)
+%year%-%track%: $abbr(%album%)$trim( x )$ifequal(1,1,a,b)
+$meta(artist)$meta_test(title)$info(bitrate) %_path%
+$progress(30,100,10,#,-)$crc32(abc)$directory(/a/b/c.mp3)$ext(/a/b.flac)

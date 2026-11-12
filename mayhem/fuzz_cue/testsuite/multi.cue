@@ -1,0 +1,20 @@
+REM GENRE "Rock"
+REM DATE 2004
+PERFORMER "Some Artist"
+TITLE "Some Album"
+FILE "album.flac" WAVE
+  TRACK 01 AUDIO
+    TITLE "First \"Song\""
+    PERFORMER "Some Artist"
+    INDEX 00 00:00:00
+    INDEX 01 00:02:00
+  TRACK 02 AUDIO
+    TITLE "Second"
+    PERFORMER "Guest"
+    SONGWRITER "Writer"
+    ISRC GBAAA0000001
+    INDEX 01 04:30:37
+  TRACK 03 AUDIO
+    TITLE Unquoted
+    PREGAP 00:02:00
+    INDEX 01 09:10:12

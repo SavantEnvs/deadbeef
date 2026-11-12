@@ -1,0 +1,10 @@
+project: savantenvs/deadbeef
+target: fuzz_tf
+testsuite:
+  - https://$MAYHEM_DOMAIN/$MAYHEM_PROJECT/$MAYHEM_TARGET/testsuite.tar
+  - file://mayhem/fuzz_tf/testsuite
+cmds:
+  - cmd: /mayhem/fuzz_tf
+    libfuzzer: true
+    timeout: 10
+    dictionary: /mayhem/mayhem/fuzz_tf/fuzz_tf.dict

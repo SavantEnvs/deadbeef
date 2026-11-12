@@ -1,0 +1,302 @@
+diff --git a/plugins/mp3/mp3.c b/plugins/mp3/mp3.c
+index 3cd4a70e7..5cbce0c29 100644
+--- a/plugins/mp3/mp3.c
++++ b/plugins/mp3/mp3.c
+@@ -127,7 +127,8 @@ cmp3_set_extra_properties (DB_playItem_t *it, mp3info_t *mp3info, int fake) {
+     if (mp3info->datasize >= 0 && mp3info->have_duration) {
+         // bitrate from file size
+         double dur = (double)deadbeef->pl_get_item_duration (it);
+-        int bitrate = mp3info->datasize * 8 / dur / 1000;
++        double br = mp3info->datasize * 8 / dur / 1000;
++        int bitrate = (br >= 0 && br < INT_MAX) ? (int)br : 0;
+         snprintf (s, sizeof (s), "%d", bitrate);
+         deadbeef->pl_replace_meta (it, ":BITRATE", s);
+     }
+diff --git a/plugins/wma/asfheader.c b/plugins/wma/asfheader.c
+index 3ddd182b8..b3499cffd 100644
+--- a/plugins/wma/asfheader.c
++++ b/plugins/wma/asfheader.c
+@@ -353,6 +353,9 @@ static void asf_utf16LEdecode(DB_FILE *fd,
+                 /* Truncated utf16 string, abort */
+                 break;
+             }
++            if (utf16[3] < 0xDC || utf16[3] >= 0xE0) {
++                break;
++            }
+             ucs = 0x10000 + ((utf16[0] << 10) | ((utf16[1] - 0xD8) << 18)
+                              | utf16[2] | ((utf16[3] - 0xDC) << 8));
+             utf16 += 4;
+@@ -482,6 +485,7 @@ static int asf_parse_header(DB_FILE *fd, asf_waveformatex_t* wfx, DB_playItem_t
+                     /* Read the packet size - uint32_t at offset 68 */
+ //                    SKIP_BYTES(fd, 20);
+                     read_uint32le(fd, &wfx->packet_size);
++                    if (wfx->packet_size > 16 * 1024 * 1024) return ASF_ERROR_INVALID_OBJECT;
+                     read_uint32le(fd, &wfx->max_packet_size);
+ 
+                     /* Skip bytes remaining in object */
+diff --git a/plugins/wma/libasf/asf.c b/plugins/wma/libasf/asf.c
+index 4ff8c9e70..a2557968f 100644
+--- a/plugins/wma/libasf/asf.c
++++ b/plugins/wma/libasf/asf.c
+@@ -45,7 +45,7 @@ static unsigned long get_long_le(void* buf)
+ {
+     unsigned char* p = (unsigned char*) buf;
+ 
+-    return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
++    return p[0] | (p[1] << 8) | (p[2] << 16) | ((unsigned long)p[3] << 24);
+ }
+ 
+ /* Read an unaligned 16-bit little endian short from buffer. */
+diff --git a/plugins/wma/libwma/codeclib_misc.h b/plugins/wma/libwma/codeclib_misc.h
+index bc82b9c33..2d9c945b6 100644
+--- a/plugins/wma/libwma/codeclib_misc.h
++++ b/plugins/wma/libwma/codeclib_misc.h
+@@ -64,7 +64,7 @@ static inline int32_t MULT32(int32_t x, int32_t y) {
+ #ifndef INCL_OPTIMIZED_MULT31
+ #define INCL_OPTIMIZED_MULT31
+ static inline int32_t MULT31(int32_t x, int32_t y) {
+-  return MULT32(x,y)<<1;
++  return (int32_t)((uint32_t)MULT32(x,y)<<1);
+ }
+ #endif
+ 
+diff --git a/plugins/wma/libwma/ffmpeg_get_bits.h b/plugins/wma/libwma/ffmpeg_get_bits.h
+index 9896295f9..fd8c10acc 100644
+--- a/plugins/wma/libwma/ffmpeg_get_bits.h
++++ b/plugins/wma/libwma/ffmpeg_get_bits.h
+@@ -187,7 +187,7 @@ for examples see get_bits, show_bits, skip_bits, get_vlc
+ /* ROCKBOX: work around "set but not used" warning */
+ #   define OPEN_READER(name, gb)\
+         unsigned int name##_index= (gb)->index;\
+-        int name##_cache __attribute__((unused)) = 0;\
++        unsigned int name##_cache __attribute__((unused)) = 0;\
+ 
+ #   define CLOSE_READER(name, gb)\
+         (gb)->index= name##_index;\
+diff --git a/plugins/wma/libwma/ffmpeg_intreadwrite.h b/plugins/wma/libwma/ffmpeg_intreadwrite.h
+index 24f03292e..d1ceed6ad 100644
+--- a/plugins/wma/libwma/ffmpeg_intreadwrite.h
++++ b/plugins/wma/libwma/ffmpeg_intreadwrite.h
+@@ -191,7 +191,7 @@ union unaligned_16 { uint16_t l; } __attribute__((packed)) av_alias;
+ #define AV_RB32(x) (htobe32(*(const uint32_t*)(x)))
+ #else
+ #   define AV_RB32(x)                           \
+-    ((((const uint8_t*)(x))[0] << 24) |         \
++    (((uint32_t)((const uint8_t*)(x))[0] << 24) | \
+      (((const uint8_t*)(x))[1] << 16) |         \
+      (((const uint8_t*)(x))[2] <<  8) |         \
+       ((const uint8_t*)(x))[3])
+diff --git a/plugins/wma/libwma/wmadeci.c b/plugins/wma/libwma/wmadeci.c
+index 570b27eb2..2a4e1cc66 100644
+--- a/plugins/wma/libwma/wmadeci.c
++++ b/plugins/wma/libwma/wmadeci.c
+@@ -437,7 +437,7 @@ int wma_decode_init(WMADecodeContext* s, asf_waveformatex_t *wfx)
+                     {
+                         a = wma_critical_freqs[i];
+                         b = s->sample_rate;
+-                        pos = ((block_len * 2 * a)  + (b << 1)) / (4 * b);
++                        pos = (int)((((int64_t)block_len * 2 * a)  + ((int64_t)b << 1)) / (4 * (int64_t)b));
+                         pos <<= 2;
+                         if (pos > block_len)
+                             pos = block_len;
+@@ -455,8 +455,8 @@ int wma_decode_init(WMADecodeContext* s, asf_waveformatex_t *wfx)
+             s->coefs_end[k] = (s->frame_len - ((s->frame_len * 9) / 100)) >> k;
+             /* high freq computation */
+ 
+-            fixed32 tmp1 = high_freq*2;            /* high_freq is a fixed32!*/
+-            fixed32 tmp2=itofix32(s->sample_rate>>1);
++            fixed32 tmp1 = (fixed32)((uint32_t)high_freq*2u);            /* high_freq is a fixed32!*/
++            fixed32 tmp2=(fixed32)((uint32_t)(s->sample_rate>>1) << PRECISION);
+             s->high_band_start[k] = fixtoi32( fixdiv32(tmp1, tmp2) * (block_len>>1) +0x8000);
+ 
+             /*
+diff --git a/plugins/wma/wma_plugin.c b/plugins/wma/wma_plugin.c
+index 5ee65689e..d136089a5 100644
+--- a/plugins/wma/wma_plugin.c
++++ b/plugins/wma/wma_plugin.c
+@@ -156,8 +156,8 @@ wmaplug_init (DB_fileinfo_t *_info, DB_playItem_t *it) {
+     _info->fmt.bps = info->wfx.bitspersample;
+     _info->fmt.channels = info->wfx.channels;
+     _info->fmt.samplerate = info->wfx.rate;
+-    for (int i = 0; i < _info->fmt.channels; i++) {
+-        _info->fmt.channelmask |= 1 << i;
++    for (int i = 0; i < _info->fmt.channels && i < 32; i++) {
++        _info->fmt.channelmask |= 1u << i;
+     }
+ 
+     if (!info->info.file->vfs->is_streaming ()) {
+@@ -425,12 +425,15 @@ wmaplug_insert (ddb_playlist_t *plt, DB_playItem_t *after, const char *fname) {
+     deadbeef->fclose (fp);
+     fp = NULL;
+ 
++    if (wfx.packet_size == 0 || wfx.numpackets == 0) { deadbeef->pl_item_unref (it); return NULL; }
+     int64_t i_count = (l - first_frame_offset) / wfx.packet_size;
+ 
+     int64_t i_length = wfx.play_duration / 10 * i_count / wfx.numpackets - wfx.preroll * 1000;
+     trace ("i_length: %lld (%lld / 10 * %lld / %lld - %lld * 1000)\n", i_length, wfx.play_duration, i_count, wfx.numpackets, wfx.preroll);
+ 
+-    int64_t totalsamples = i_length / 1000 * wfx.rate / 1000;
++    int64_t totalsamples;
++    if (__builtin_mul_overflow (i_length / 1000, (int64_t)wfx.rate, &totalsamples)) { deadbeef->pl_item_unref (it); return NULL; }
++    totalsamples /= 1000;
+     trace ("totalsamples: %lld (%lld / %d)\n", totalsamples, i_length, wfx.rate);
+ 
+     deadbeef->plt_set_item_duration (plt, it, totalsamples / (float)wfx.rate);
+diff --git a/src/junklib.c b/src/junklib.c
+index 5dd634aaa..588449714 100644
+--- a/src/junklib.c
++++ b/src/junklib.c
+@@ -564,6 +564,7 @@ ddb_iconv (const char *cs_out, const char *cs_in, char *out, int outlen, const c
+         }
+         else if (!strcasecmp (cs_in, "UTF-16LE") || !strcasecmp (cs_in, "UCS-2LE")) {
+             char *target = out;
++            inlen &= ~1;
+ 
+             char *aligned_in = _get_aligned_copy (in, inlen);
+             if (aligned_in != NULL) {
+@@ -3609,7 +3610,7 @@ junklib_id3v2_sync_frame (const int version_major, uint8_t *data, const int sync
+     while (written < synced_size && consumed < synced_size) {
+         *writeptr++ = *data;
+         written++;
+-        if (data[0] == 0xff && synced_size-written >= 2 && data[1] == 0) {
++        if (data[0] == 0xff && synced_size-consumed >= 2 && data[1] == 0) {
+             data++;
+             consumed++;
+         }
+@@ -3653,6 +3654,7 @@ junk_load_comm_frame (int version_major, const char *field_name, playItem_t *it,
+     trace ("COMM raw data: %s\n", descr);
+     // find value
+     char *value = descr;
++    int descr_len = outsize;
+     while (*value && outsize-- > 0) {
+         value++;
+     }
+@@ -3663,7 +3665,9 @@ junk_load_comm_frame (int version_major, const char *field_name, playItem_t *it,
+     }
+ 
+     *value = 0;
+-    value++;
++    if (value - descr < descr_len) {
++        value++;
++    }
+ 
+     size_t len = strlen (descr) + strlen (value) + 3;
+     char comment[len];
+@@ -4344,6 +4348,9 @@ junk_id3v2_read_full (playItem_t *it, DB_id3v2_tag_t *tag_store, DB_FILE *fp) {
+     trace ("version: 2.%d.%d, unsync: %d, extheader: %d, experimental: %d\n", version_major, version_minor, unsync, extheader, expindicator);
+     
+     if (extheader) {
++        if (size < 4) {
++            goto error;
++        }
+         uint32_t sz = (readptr[3] << 0) | (readptr[2] << 7) | (readptr[1] << 14) | (readptr[0] << 21);
+         if (size < sz) {
+             trace ("error: size of ext header (%d) is greater than tag size\n", sz);
+@@ -4354,7 +4361,7 @@ junk_id3v2_read_full (playItem_t *it, DB_id3v2_tag_t *tag_store, DB_FILE *fp) {
+ 
+     int found_wmp_popm = 0;
+ 
+-    while (readptr - tag <= size - 4 && *readptr) {
++    while (readptr - tag <= (int64_t)size - 4 && *readptr) {
+         if (version_major == 3 || version_major == 4) {
+             trace ("pos %d of %d\n", readptr - tag, size);
+             char frameid[5];
+@@ -4385,7 +4392,7 @@ junk_id3v2_read_full (playItem_t *it, DB_id3v2_tag_t *tag_store, DB_FILE *fp) {
+                 sz = (readptr[3] << 0) | (readptr[2] << 7) | (readptr[1] << 14) | (readptr[0] << 21);
+             }
+             else if (version_major == 3) {
+-                sz = (readptr[3] << 0) | (readptr[2] << 8) | (readptr[1] << 16) | (readptr[0] << 24);
++                sz = (readptr[3] << 0) | (readptr[2] << 8) | (readptr[1] << 16) | ((uint32_t)readptr[0] << 24);
+             }
+             else {
+                 trace ("unknown id3v2 version (2.%d.%d)\n", version_major, version_minor);
+@@ -4393,7 +4400,7 @@ junk_id3v2_read_full (playItem_t *it, DB_id3v2_tag_t *tag_store, DB_FILE *fp) {
+             }
+             readptr += 4;
+             trace ("got frame %s, size %d, pos %d, tagsize %d\n", frameid, sz, readptr-tag, size);
+-            if (readptr - tag >= size - sz) {
++            if (readptr - tag + 2 + (int64_t)sz > size) {
+                 trace ("frame is out of tag bounds\n");
+                 err = -1;
+                 goto error; // size of frame is more than size of tag
+diff --git a/src/playlist.c b/src/playlist.c
+index f83d925ce..0f117f63d 100644
+--- a/src/playlist.c
++++ b/src/playlist.c
+@@ -3164,7 +3164,7 @@ pl_format_item_queue (playItem_t *it, char *s, int size) {
+ void
+ pl_format_time (float t, char *dur, int size) {
+     if (t >= 0) {
+-        t = roundf (t);
++        t = roundf (fminf (t, 359999.f));
+         int hourdur = (int)floor (t / (60 * 60));
+         int mindur = (int)floor ((t - hourdur * 60 * 60) / 60);
+         int secdur = (int)floor (t - hourdur * 60 * 60 - mindur * 60);
+diff --git a/src/tf.c b/src/tf.c
+index 0cc7b809b..967a53e27 100644
+--- a/src/tf.c
++++ b/src/tf.c
+@@ -1234,7 +1234,7 @@ tf_func_longer(ddb_tf_context_t *ctx, int argc, const uint16_t *arglens, const c
+ // spaces) to the right of `expr` to make the result `len` characters long. Otherwise the function returns str unchanged.
+ int
+ tf_func_pad_impl (ddb_tf_context_t *ctx, int argc, const uint16_t *arglens, const char *args, char *out, int outlen, int fail_on_undef, int right, int cut) {
+-    if (argc < 1 || argc > 3) {
++    if (argc < 2 || argc > 3) {
+         return -1;
+     }
+ 
+@@ -3033,7 +3033,7 @@ tf_eval_int (ddb_tf_context_t *ctx, const char *code, int size, char *out, int o
+                 code++;
+                 size--;
+                 uint16_t *arglens = NULL;
+-                char numargs = *code;
++                unsigned char numargs = *code;
+                 if (numargs) {
+                     // copy arg lengths, to make sure they're aligned
+                     arglens = alloca (numargs * sizeof (uint16_t));
+@@ -4248,7 +4248,7 @@ tf_compile (const char *script) {
+     if (len == 0) {
+         return calloc(1,4);
+     }
+-    uint8_t *code = calloc(len * 3, 1);
++    uint8_t *code = calloc(len * 16 + 64, 1);
+ 
+     c.o = code;
+ 
+@@ -4290,7 +4290,7 @@ tf_import_legacy (const char *fmt, char *out, int outsize) {
+             outsize -= 2;
+         }
+         else if (*fmt == '\n') {
+-            if (outsize < 7) {
++            if (outsize < 8) {
+                 break;
+             }
+             strcpy (out, "$crlf()");
+diff --git a/src/utf8.c b/src/utf8.c
+index baf05a9f9..982bd708e 100644
+--- a/src/utf8.c
++++ b/src/utf8.c
+@@ -234,7 +234,7 @@ uint32_t u8_nextchar(const char *s, int32_t *i)
+         ch <<= 6;
+         ch += (unsigned char)s[(*i)++];
+         sz++;
+-    } while (s[*i] && !isutf(s[*i]));
++    } while (s[*i] && !isutf(s[*i]) && sz < 4);
+     ch -= offsetsFromUTF8[sz-1];
+ 
+     return ch;
+diff --git a/src/vfs_stdio.c b/src/vfs_stdio.c
+index 3c6028795..55335e1c2 100644
+--- a/src/vfs_stdio.c
++++ b/src/vfs_stdio.c
+@@ -170,7 +170,9 @@ stdio_seek (DB_FILE *stream, int64_t offset, int whence) {
+     // convert offset to absolute
+     if (whence == SEEK_CUR) {
+         whence = SEEK_SET;
+-        offset = ((STDIO_FILE*)stream)->offs + offset;
++        if (__builtin_add_overflow (((STDIO_FILE*)stream)->offs, offset, &offset)) {
++            return -1;
++        }
+     }
+     off64_t res = lseek64 (((STDIO_FILE *)stream)->stream, offset, whence);
+     if (res == -1) {

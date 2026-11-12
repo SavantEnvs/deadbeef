@@ -1,0 +1,1 @@
+$if(%title%,%title%,$left(%artist%,2)) \\n\\t \x27[%album%]\x27 %%
